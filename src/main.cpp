@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <daqser.hpp>
 #include <daqser_can.hpp>
+#include <virtualTimer.h>
 
 #define VERSION_ARGS(major, minor, patch) major, minor, patch
 
@@ -8,16 +9,16 @@
 #define SCHEMA_VERSION VERSION_ARGS(1, 0, 0)
 
 // Listen to boards
-#define RX_BMS
-#define RX_IMD
+// #define RX_BMS
+// #define RX_IMD
 
-VirtualTimerGroup g_timerGroup;
+VirtualTimerGroup timerGroup;
 // Function to record and send data
 // Called every 100ms
 void recordData()
 {
   //  Prepare data from the CAN bus for serialization
-  daqser::updateSignals();
+  // daqser::updateSignals();
   // Serialize the data, and get the raw bytes
   std::vector<std::uint8_t> byteData = daqser::serializeFrame();
   // send the data over lora or something
@@ -32,10 +33,10 @@ void setup()
   // Tell daqser what schema we are using to serialize the data
   daqser::setSchema(SCHEMA_NAME, SCHEMA_VERSION);
   // Tell daqser to record/send data from these boards
-  g_timerGroup.AddTimer(100, recordData);
+  timerGroup.AddTimer(100, recordData);
 }
 
 void loop()
 {
-  g_timerGroup.Tick(millis());
+  timerGroup.Tick(millis());
 }
