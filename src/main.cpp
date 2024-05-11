@@ -1,7 +1,8 @@
 #include <Arduino.h>
 #include <daqser.hpp>
-#include <daqser_can.hpp>
+// #include <daqser_can.hpp>
 #include <virtualTimer.h>
+#include <teensy_can.h>
 
 #define VERSION_ARGS(major, minor, patch) major, minor, patch
 
