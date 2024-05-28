@@ -4,14 +4,23 @@
 #include <message.hpp>
 #include <com_interface.hpp>
 #include <RH_RF95.h> // dependency of com_interface.hpp, for some reason, it isn't included in the main.cpp file
-
+#include <TeensyThreads.h>
 #include <vector>
 
 #define VERSION_ARGS(major, minor, patch) major, minor, patch
 #define SCHEMA_NAME "esp32dev_test"
 #define SCHEMA_VERSION VERSION_ARGS(1, 0, 0)
+#define TIMEOUT 1000
 
 wircom::ComInterface g_comInterface{};
+
+void listenForMessages()
+{
+    while (true)
+    {
+        g_comInterface.listen(TIMEOUT);
+    }
+}
 
 void onReceiveAnyMessage(std::vector<std::uint8_t> data)
 {
@@ -43,9 +52,12 @@ void setup()
     g_comInterface.initialize();
     g_comInterface.addRXCallbackToAny(onReceiveAnyMessage);
     g_comInterface.addRXCallback(wircom::MessageContentType::MSG_CON_META, onRecieveMetaMessage);
+    threads.addThread(listenForMessages);
 }
 
 void loop()
 {
-    g_comInterface.listen();
+    // g_comInterface.listen();
+    std::cout << "Hello from loop!" << std::endl;
+    delay(2000);
 }
