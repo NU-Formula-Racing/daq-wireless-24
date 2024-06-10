@@ -1,14 +1,19 @@
 #include <Arduino.h>
+#include <virtualTimer.h>
+#include <vector>
+#include <TeensyThreads.h>
+
+// daqser
 #include <daqser.hpp>
 #include <daqser_can.hpp>
-#include <virtualTimer.h>
+
+// wircom
 #include <message.hpp>
 #include <builder.hpp>
 #include <com_interface.hpp>
 #include <RH_RF95.h> // dependency of com_interface.hpp, for some reason, it isn't included in the main.cpp file
-#include <TeensyThreads.h>
 
-#include <vector>
+#include "schema.hpp"
 
 #define VERSION_ARGS(major, minor, patch) major, minor, patch
 #define SCHEMA_NAME "daq-schema"
@@ -16,7 +21,7 @@
 #define LISTEN_TIMEOUT 1000
 #define DT_PER_SECOND 5
 
-VirtualTimer g_dataTransferTimer;
+VirtualTimerGroup g_dataTransferTimer;
 wircom::ComInterface g_comInterface{};
 
 void listenForMessages()
@@ -48,38 +53,47 @@ void onDriveRequest(wircom::Message message)
 void setup()
 {
     Serial.begin(9600);
+
+    std::cout << "Initializing daqser..." << std::endl;
     daqser::initialize();
     daqser::initializeCAN();
+    daqser::setSchema(SCHEMA_CONTENTS); // work around cause I just learned that you can't flash files to the teensy
+
+    std::cout << "Initializing wircom..." << std::endl;
     g_comInterface.initialize();
-
     threads.addThread(listenForMessages);
-
     g_comInterface.addRXCallback(
         wircom::MessageType::MSG_REQUEST,
-        wircom::MessageContentType::MSG_CON_META, 
-        onMetaRequest
-    );
-
+        wircom::MessageContentType::MSG_CON_META,
+        onMetaRequest);
     g_comInterface.addRXCallback(
         wircom::MessageType::MSG_REQUEST,
         wircom::MessageContentType::MSG_CON_DRIVE,
-        onDriveRequest
-    );
+        onDriveRequest);
+
+    g_dataTransferTimer.AddTimer(10, []()
+                                 { daqser::tickCAN(); });
+    std::cout << "Finished setup" << std::endl;
 }
 
 void loop()
 {
+    unsigned long start = millis();
+    unsigned long end = start + 1000 / DT_PER_SECOND;
+
     while (true)
     {
-        unsigned long start = millis();
-        unsigned long end = start + 1000 / DT_PER_SECOND;
+        g_dataTransferTimer.Tick(millis());
 
         if (millis() >= end)
         {
             std::cout << "Sending data..." << std::endl;
-            daqser::tickCAN();
+            daqser::updateSignals();
+            std::cout << "CAN Updated" << std::endl;
             // send daqser data over serial
             std::vector<std::uint8_t> data = daqser::serializeFrame();
+            std::cout << daqser::serializeFrameToJson() << std::endl;
+
             wircom::Message message = wircom::MessageBuilder::createDataTransferMessage(data);
             g_comInterface.sendMessage(message);
 
