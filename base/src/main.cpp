@@ -16,7 +16,9 @@
 #define VERSION_ARGS(major, minor, patch) major, minor, patch
 #define TIMEOUT 1000
 #define REPORTS_PER_SECOND 5
+#define DATA_REQUESTS_PER_SECOND 5
 
+VirtualTimerGroup g_reportingTimer;
 wircom::ComInterface g_comInterface{};
 std::string g_schemaName;
 int g_version[3]; // major, minor, patch
@@ -70,7 +72,7 @@ void onRecieveMetaResponse(wircom::Message msg)
     {
         std::cout << "Schema not found in daqser registry" << std::endl;
         std::cout << "Sending a request for the DRIVE" << std::endl;
-        g_comInterface.sendMessage(wircom::MessageBuilder::createMetaMessageRequest());
+        g_comInterface.sendMessage(wircom::MessageBuilder::createDriveMessageRequest());
     }
 }
 
@@ -109,6 +111,28 @@ void onDataTransfer(wircom::Message msg)
     daqser::deserializeFrame(data);
 }
 
+void reportData()
+{
+    if (g_state != ApplicationState::CONNECTION_ESTABLISHED)
+    {
+        return;
+    }
+
+    std::string json = daqser::serializeFrameToJson();
+    std::cout << json << std::endl;
+}
+
+void requestData()
+{
+    if (g_state != ApplicationState::CONNECTION_ESTABLISHED)
+    {
+        return;
+    }
+
+    g_comInterface.sendMessage(wircom::MessageBuilder::createDataTransferRequest(), false);
+
+}
+
 
 void setup()
 {
@@ -127,8 +151,11 @@ void setup()
         onRecieveDriveResponse
     );
 
+    g_state = ApplicationState::INITIALIZING_CONNECTION;
     threads.addThread(listenForMessages);
     g_comInterface.sendMessage(wircom::MessageBuilder::createMetaMessageRequest());
+    g_reportingTimer.AddTimer(1000 / REPORTS_PER_SECOND, reportData);
+    g_reportingTimer.AddTimer(1000 / DATA_REQUESTS_PER_SECOND, requestData);
 }
 
 void loop()
@@ -138,19 +165,5 @@ void loop()
         return;
     }
 
-    while (true)
-    {
-        unsigned long start = millis();
-        unsigned long end = start + 1000 / REPORTS_PER_SECOND;
-
-        if (millis() >= end)
-        {
-            // send daqser data over serial
-            std::string json = daqser::serializeFrameToJson();
-            std::cout << json << std::endl;
-
-            start = millis();
-            end = start + 1000 / REPORTS_PER_SECOND;
-        }
-    }
+    g_reportingTimer.Tick(millis());
 }
