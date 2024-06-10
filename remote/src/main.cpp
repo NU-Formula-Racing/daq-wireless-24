@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <daqser.hpp>
+#include <daqser_can.hpp>
 #include <virtualTimer.h>
 #include <message.hpp>
 #include <builder.hpp>
@@ -10,18 +11,19 @@
 #include <vector>
 
 #define VERSION_ARGS(major, minor, patch) major, minor, patch
-#define SCHEMA_NAME "esp32dev_test"
+#define SCHEMA_NAME "daq-schema"
 #define SCHEMA_VERSION VERSION_ARGS(1, 0, 0)
-#define TIMEOUT 1000
+#define LISTEN_TIMEOUT 1000
+#define DT_PER_SECOND 5
 
+VirtualTimer g_dataTransferTimer;
 wircom::ComInterface g_comInterface{};
 
 void listenForMessages()
 {
     while (true)
     {
-        // std::cout << "Listening for messages" << std::endl;
-        g_comInterface.listen(TIMEOUT);
+        g_comInterface.listen(LISTEN_TIMEOUT);
         g_comInterface.tick();
     }
 }
@@ -33,10 +35,23 @@ void onMetaRequest(wircom::Message message)
     g_comInterface.sendMessage(response);
 }
 
+void onDriveRequest(wircom::Message message)
+{
+    // get the contents of the drive file from daqser
+    std::string driveFileContents = daqser::getDriveContents();
+    // create a message with the drive file contents
+    wircom::Message response = wircom::MessageBuilder::createDriveMessageResponse(message.messageID, driveFileContents);
+    // send the message
+    g_comInterface.sendMessage(response);
+}
+
 void setup()
 {
     Serial.begin(9600);
+    daqser::initialize();
+    daqser::initializeCAN();
     g_comInterface.initialize();
+
     threads.addThread(listenForMessages);
 
     g_comInterface.addRXCallback(
@@ -44,9 +59,32 @@ void setup()
         wircom::MessageContentType::MSG_CON_META, 
         onMetaRequest
     );
+
+    g_comInterface.addRXCallback(
+        wircom::MessageType::MSG_REQUEST,
+        wircom::MessageContentType::MSG_CON_DRIVE,
+        onDriveRequest
+    );
 }
 
 void loop()
 {
-    std::cout << "Looping" << std::endl;
+    while (true)
+    {
+        unsigned long start = millis();
+        unsigned long end = start + 1000 / DT_PER_SECOND;
+
+        if (millis() >= end)
+        {
+            std::cout << "Sending data..." << std::endl;
+            daqser::tickCAN();
+            // send daqser data over serial
+            std::vector<std::uint8_t> data = daqser::serializeFrame();
+            wircom::Message message = wircom::MessageBuilder::createDataTransferMessage(data);
+            g_comInterface.sendMessage(message);
+
+            start = millis();
+            end = start + 1000 / DT_PER_SECOND;
+        }
+    }
 }
