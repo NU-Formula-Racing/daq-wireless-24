@@ -24,6 +24,10 @@
 VirtualTimerGroup g_dataTransferTimer;
 wircom::ComInterface g_comInterface{};
 
+unsigned long g_startTransmissionTime = millis();
+unsigned long g_endTransmissionTime = g_startTransmissionTime + 1000 / DT_PER_SECOND;
+
+
 void listenForMessages()
 {
     while (true)
@@ -78,27 +82,25 @@ void setup()
 
 void loop()
 {
-    unsigned long start = millis();
-    unsigned long end = start + 1000 / DT_PER_SECOND;
+    g_dataTransferTimer.Tick(millis());
 
-    while (true)
+    if (millis() >= g_endTransmissionTime)
     {
-        g_dataTransferTimer.Tick(millis());
-
-        if (millis() >= end)
+        std::cout << "Sending data..." << std::endl;
+        daqser::updateSignals();
+        std::cout << "CAN Updated" << std::endl;
+        // send daqser data over serial
+        std::vector<std::uint8_t> data = daqser::serializeFrame();
+        for (std::uint8_t byte : data)
         {
-            std::cout << "Sending data..." << std::endl;
-            daqser::updateSignals();
-            std::cout << "CAN Updated" << std::endl;
-            // send daqser data over serial
-            std::vector<std::uint8_t> data = daqser::serializeFrame();
-            std::cout << daqser::serializeFrameToJson() << std::endl;
-
-            wircom::Message message = wircom::MessageBuilder::createDataTransferMessage(data);
-            g_comInterface.sendMessage(message);
-
-            start = millis();
-            end = start + 1000 / DT_PER_SECOND;
+            std::cout << std::hex << (int)byte << " ";
         }
+        std::cout << std::endl;
+
+        wircom::Message message = wircom::MessageBuilder::createDataTransferMessage(data);
+        g_comInterface.sendMessage(message);
+
+        g_startTransmissionTime = millis();
+        g_startTransmissionTime = g_startTransmissionTime + 1000 / DT_PER_SECOND;
     }
 }
