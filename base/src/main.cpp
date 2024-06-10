@@ -1,12 +1,17 @@
 #include <Arduino.h>
-#include <daqser.hpp>
+#include <vector>
 #include <virtualTimer.h>
+
+// daqser
+#include <daqser.hpp>
+
+// wireless communication
 #include <message.hpp>
 #include <builder.hpp>
 #include <com_interface.hpp>
 #include <RH_RF95.h> // dependency of com_interface.hpp, for some reason, it isn't included in the main.cpp file
 #include <TeensyThreads.h>
-#include <vector>
+
 
 #define VERSION_ARGS(major, minor, patch) major, minor, patch
 #define TIMEOUT 1000
