@@ -12,16 +12,22 @@
 #include <RH_RF95.h> // dependency of com_interface.hpp, for some reason, it isn't included in the main.cpp file
 #include <TeensyThreads.h>
 
+#include "schema.hpp"
+
 
 #define VERSION_ARGS(major, minor, patch) major, minor, patch
 #define TIMEOUT 1000
 #define REPORTS_PER_SECOND 5
 #define DATA_REQUESTS_PER_SECOND 5
 
+#define LED_PIN 8
+
+VirtualTimerGroup g_initalizationTimer;
 VirtualTimerGroup g_reportingTimer;
 wircom::ComInterface g_comInterface{};
 std::string g_schemaName;
 int g_version[3]; // major, minor, patch
+bool ledState = false;
 
 enum ApplicationState
 {
@@ -66,6 +72,7 @@ void onRecieveMetaResponse(wircom::Message msg)
     {
         std::cout << "Schema found in daqser registry" << std::endl;
         daqser::setSchema(g_schemaName, res.content.major, res.content.minor, res.content.patch);
+        std::cout << "Connection established! Set through the metdata file" << std::endl;
         g_state = ApplicationState::CONNECTION_ESTABLISHED;
     }
     else
@@ -78,23 +85,24 @@ void onRecieveMetaResponse(wircom::Message msg)
 
 void onRecieveDriveResponse(wircom::Message msg)
 {
-    std::vector<std::uint8_t> data = msg.data;
-    std::cout << "Received message of length: " << data.size() << std::endl;
-    wircom::ContentResult<wircom::DriveContent> res = wircom::MessageParser::parseDriveContent(data);
-    if (res.success)
-    {
-        std::cout << "Parsed drive content: " << res.content.driveContent << std::endl;
-    }
-    else
-    {
-        std::cout << "Failed to parse drive content" << std::endl;
-    }
-    Serial.println();
+    // std::vector<std::uint8_t>& data = msg.data;
+    // std::cout << "Received message of length: " << data.size() << std::endl;
 
-    // now set the schema from the drive file
-    // daqser::setSchemaFromDrive(res.content.driveContent);
+    // for (int i = 0; i < data.size(); i++)
+    // {
+    //     std::cout << data[i];
+    // }
 
-    // now we can set the application state to CONNECTION_ESTABLISHED
+    // wircom::ContentResult<wircom::DriveContent> res = wircom::MessageParser::parseDriveContent(data);
+
+    // std::cout << "Parsed drive content: " << res.content.driveContent << std::endl;
+    
+    // if (!res.success)
+    // {
+    //     std::cout << "Failed to parse drive content" << std::endl;
+    //     return;
+    // }
+    // // now we can set the application state to CONNECTION_ESTABLISHED
     g_state = ApplicationState::CONNECTION_ESTABLISHED;
 }
 
@@ -118,8 +126,13 @@ void reportData()
         return;
     }
 
-    std::string json = daqser::serializeFrameToJson();
-    std::cout << json << std::endl;
+    std::cout << "Reporting data..." << std::endl;
+    std::vector<std::uint8_t> data = daqser::serializeFrame();
+    for (int i = 0; i < data.size(); i++)
+    {
+        std::cout << data[i];
+    }
+    std::cout << std::endl;
 }
 
 void requestData()
@@ -129,41 +142,76 @@ void requestData()
         return;
     }
 
+    std::cout << "Requesting data..." << std::endl;
     g_comInterface.sendMessage(wircom::MessageBuilder::createDataTransferRequest(), false);
 
+}
+
+void blinkLED()
+{
+    if (ledState)
+    {
+        digitalWrite(LED_PIN, HIGH);
+    }
+    else
+    {
+        digitalWrite(LED_PIN, LOW);
+    }
+    ledState = !ledState;
 }
 
 
 void setup()
 {
     Serial.begin(9600);
-    daqser::initialize();
+    std::cout << "Initializing daqser..." << std::endl;
+    daqser::initialize(false);
+    daqser::setSchema(SCHEMA_CONTENTS);
+
+    std::cout << "Initializing wircom..." << std::endl;
     g_comInterface.initialize();
     g_comInterface.addRXCallback(
         wircom::MessageType::MSG_RESPONSE,
         wircom::MessageContentType::MSG_CON_META, 
         onRecieveMetaResponse
     );
-
     g_comInterface.addRXCallback(
         wircom::MessageType::MSG_RESPONSE,
         wircom::MessageContentType::MSG_CON_DRIVE, 
         onRecieveDriveResponse
     );
+    g_comInterface.addRXCallback(
+        wircom::MessageType::MSG_RESPONSE,
+        wircom::MessageContentType::MSG_CON_DATA_TRANSFER, 
+        onDataTransfer
+    );
 
-    g_state = ApplicationState::INITIALIZING_CONNECTION;
+    pinMode(LED_PIN, OUTPUT);
+    digitalWrite(LED_PIN, LOW);
+
     threads.addThread(listenForMessages);
-    g_comInterface.sendMessage(wircom::MessageBuilder::createMetaMessageRequest());
     g_reportingTimer.AddTimer(1000 / REPORTS_PER_SECOND, reportData);
     g_reportingTimer.AddTimer(1000 / DATA_REQUESTS_PER_SECOND, requestData);
+    
+    g_initalizationTimer.AddTimer(200, blinkLED);
+
+    std::cout << "Attempting to establish connection with the car..." << std::endl;
+    // g_comInterface.sendMessage(wircom::MessageBuilder::createMetaMessageRequest());
+    g_state = ApplicationState::CONNECTION_ESTABLISHED;
 }
 
 void loop()
 {
+    // listenForMessages();
+
     if (g_state != ApplicationState::CONNECTION_ESTABLISHED)
     {
+        g_initalizationTimer.Tick(millis());
         return;
     }
 
+    // turn on the LED
+    ledState = true;
+    digitalWrite(LED_PIN, HIGH);
     g_reportingTimer.Tick(millis());
 }
